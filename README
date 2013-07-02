@@ -1,0 +1,14 @@
+Robotexclusionrulesparser is an alternative to the Python standard library
+module robotparser. It fetches and parses robots.txt files and can answer
+questions as to whether or not a given user agent is permitted to visit a 
+certain URL.
+
+This module has some features that the standard library module robotparser 
+does not, including the ability to decode non-ASCII robots.txt files, respect
+for Expires headers and understanding of Crawl-delay and Sitemap directives 
+and wildcard syntax in path names.
+
+Complete documentation (including a comparison with the standard library
+module robotparser) is available in ReadMe.html.
+
+Robotexclusionrulesparser is released under a BSD license. 

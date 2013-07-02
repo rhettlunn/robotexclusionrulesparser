@@ -1,0 +1,810 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+	<title>A Robot Exclusion Rules Parser for Python</title>
+
+    <style type="text/css">
+        dt {
+            font-weight: bold;
+            font-family: monospace;
+            padding-bottom: .33em;
+            margin-top: 1em;
+        }
+        li { margin-bottom: .66em; margin-top: .33em;}
+        /* This style is only present on the local version of the readme. 
+           In the online version, the RSS feed is displayed. */
+        div.rss { display: none; }
+    </style>
+</head>
+
+<body>
+
+<h2>A Robot Exclusion Rules Parser for Python</h2>
+
+<div class="rss">
+    <a href="rss.xml"><img src="/common/rss.png" width="28" height="28" alt=""></a>
+    <br><a href="rss.xml">RSS</a>
+</div>
+
+<p><tt>Robotexclusionrulesparser</tt> is a BSD-licensed 
+alternative to and improvement on
+the Python standard library module <tt>robotparser</tt>.
+You can download the full package (containing documentation, unit
+tests, etc.) or just the individual module.</p>
+
+<p><tt>Robotexclusionrulesparser</tt> runs under Python 
+2.4 &ndash; 3.2. It hasn't been tested with Python ≤ 2.4, or &gt; 3.2, but
+it might work with those versions.
+</p>
+
+<p>Full package:
+<a href="robotexclusionrulesparser-1.6.1.tar.gz">robotexclusionrulesparser-1.6.1.tar.gz</a> 
+<a href="robotexclusionrulesparser-1.6.1.md5.txt">[md5 sum]</a>
+</p>
+<p>Just the module: 
+    <a href="robotexclusionrulesparser-1.6.1.py">robotexclusionrulesparser-1.6.1.py</a>
+</p>
+
+<p>This documentation refers to three similar-but-different robots.txt 
+standards called MK1994, MK1996 and GYM2008. In short, the first two
+comprise the traditional robots.txt standard and the last describes some
+extensions. There's <a href="#standards">details about these
+robots.txt standards below</a>.
+</p>
+
+<h3>Differences Between <tt>robotexclusionrulesparser</tt> and Python's <tt>robotparser</tt></h3>
+
+<p>This module offers a class (<tt>RobotFileParserLookalike</tt>) that
+is a functional drop-in replacement for the standard library's
+<tt>robotparser.RobotFileParser</tt>. You can also use the slightly nicer
+but different interface exposed by the class 
+<tt>RobotExclusionRulesParser</tt>. Both classes differ from the 
+Python standard library module as desrcibed below.
+</p>
+
+<ol>
+    <li><strong>This module understands the 
+        <a href="#gym2008">GYM2008</a> syntax.</strong> GYM2008 
+        is shorthand for the robots.txt syntax extensions (path wildcards,
+        the <tt>Crawl-delay</tt> directive and the <tt>Sitemap</tt> directive)
+        agreed upon by 
+        <b>G</b>oogle, <b>Y</b>ahoo and <b>M</b>icrosoft in 2008. 
+    </li>
+    <li><strong>This module accepts non-ASCII characters in
+        robots.txt.</strong> It decodes the file
+        with the encoding specified in the HTTP Content-type header sent with robots.txt file.
+        If no encoding is specified, it defaults to ISO-8859-1 per the HTTP specs.
+    </li>
+    <li><strong>This module implements the "Expiration" section
+        of MK1996.</strong> Specifically, it looks for an
+        HTTP Expires header when fetching robots.txt. If it finds one, it stores that expiration
+        date. Otherwise it uses the MK1996 default of one week. The function
+        <tt>is_expired()</tt> makes use of this date; see <a href="#usage">the
+        usage notes</a> for more information. Consequently, this module dispenses with the
+        <tt>modified()</tt> and <tt>mtime()</tt> functions provided by
+        <tt>robotparser</tt>. However, I deliberately left the instance variable
+        <tt>expiration_date</tt> easily accessible in case you want to mess with it.
+    </li>
+    <li><strong>This module handles HTTP fetching errors differently
+        than <tt>robotparser</tt>.</strong> MK1996 is mostly non-committal on this topic, so
+        handling of these codes is somewhat implementation dependent. IMHO,
+        <tt>robotparser</tt> complies with the letter but not the spirit of MK1996 with
+        regards to handling error codes. MK1996 says, "On the request attempt resulted in
+        temporary failure [<i>sic</i>] a robot should defer visits to the site until such
+        time as the resource can be retrieved". It also says that that "is not required...[but
+        is] recommended". <tt>robotparser</tt> handles those errors internally (e.g. a 503
+        Service Unavailable is interpreted as "allow all");
+        this module punts such errors up to the caller so that she can
+        decide how to handle them.
+    </li>
+    <li>There's a bug in <tt>robotparser</tt>'s handling of robots.txt <strong>files that
+        contain a BOM (byte order mark)</strong>. It doesn't make any accomodation for them, so
+        it might see the first line of a robots.txt file with a UTF-8 BOM as this:<br>
+        <tt>&#xef;&#xbb;&#xbf;User-agent: foobot</tt>
+
+        <p>The bug can have significant consequences when robots.txt consists of this:<br>
+           <tt>[BOM]User-agent: *<br>
+           Disallow: /
+           </tt><br>
+           The user-agent line will be seen as garbage and so the disallow rule will be
+           ignored. The result will be that all robots will be permitted everywhere which is
+           the exact opposite of what the robots.txt author intended.
+        </p>
+
+        <p>This module doesn't get confused by BOMs; it simply ignores them.</p>
+    </li>
+    <li><strong>This module adds a user_agent attribute</strong> that,
+        if populated, is sent in lieu of Python's user agent when fetching robots.txt from
+        the Web.
+    </li>
+    <li>This module's <tt>parse()</tt> function accepts a
+        string; that string can be Unicode. If it isn't Unicode, it's converted
+        to Unicode using ISO-8859-1.
+    </li>
+    <li><strong>This module adds a <tt>response_code</tt> attribute</strong> that 
+        reports (what else?) the response code when a robots.txt file is fetched from a 
+        remote server.
+    </li>
+    <li>This module accepts "user-agent" or "useragent" as being
+        valid in robots.txt. The spec permits only the former.
+    </li>
+    <li>There's a bug in <tt>robotparser</tt>'s handling of paths that contain a %-encoded
+        forward slash; MK1996 says that they shouldn't be translated but the robotparser module
+        does. This module replaces that bug with newer, more interesting bugs. =)
+    </li>
+</ol>
+
+
+<h3 id="usage">Usage - General</h3>
+
+<p>The module has two classes: <tt>RobotExclusionRulesParser</tt> and
+<tt>RobotFileParserLookalike</tt>. The latter offers all the features
+of the former and also bolts on an API that makes it a drop-in replacement for 
+the standard library's <tt>robotparser.RobotFileParser</tt>.
+</p>
+
+<p>The module defines the constants <tt>MK1996</tt> and <tt>GYM2008</tt>
+which refer to the different syntaxes that this module understands. MK1996 
+is the traditional syntax; GYM2008 respects wildcards in paths.
+</p>
+
+
+<h3>Usage - Class <tt>RobotExclusionRulesParser</tt></h3>
+
+<p>A <tt>RobotExclusionRulesParser</tt> instance has five functions and 
+five attributes. The most common usage is to call <tt>fetch()</tt> to set up the 
+parser and then call <tt>is_allowed()</tt>. If your code is long-running, 
+you'll also want to call <tt>is_expired()</tt> occasionally. Everything 
+else is non-essential. The constructor takes no parameters.
+</p>
+
+<h4>Functions</h4>
+
+<dl>
+    <dt>fetch(url, timeout=None)</dt>
+    <dd>Fetch robots.txt from the URL provided and parse it. This method sets
+        the <tt>expiration_date</tt> and <tt>source_url</tt> attributes.
+
+        <p>The timeout (supported under Python &gt; 2.5) is a float measured in
+        seconds. If a timeout occurs, <tt>urllib2.URLError</tt> is raised under 
+        Python 2 and <tt>socket.timeout</tt> under Python 3.
+        </p>
+    </dd>
+
+    <dt>parse(content)</dt>
+    <dd>Parse a string representing the content of a robots.txt file. This is 
+        useful if your robots.txt file isn't
+        HTTP-accessible, or if you just want to experiment. The unit tests make
+        heavy use of this function.
+    </dd>
+
+    <dt>is_allowed(user_agent, url, syntax=GYM2008)</dt>
+    <dd>Return a boolean indicating whether or not the given user agent is allowed to visit
+            the URL. The user agents listed in robots.txt only need be present as a substring in
+            the UserAgent parameter for this function to match them; the comparison is
+            case-insensitive.
+        <p>For instance, passing a <tt>user_agent</tt> of <tt>Mozilla/5.0 (compatible;
+            Foobot/2.1)</tt> would match the user agent rule <tt>foobot</tt>.
+        </p>
+
+        <p>The scheme and authority are discarded from the URL when comparing it to robots.txt
+            rules. (e.g. <tt>http://www.example.com/foo/bar.html</tt> becomes
+            <tt>/foo/bar.html</tt>.) This is the way you want it to work -- the rules in
+            robots.txt don't specify scheme and authority themselves, so one can't match against
+            them.
+        </p>
+        
+        <p>The syntax parameter must be one of <tt>GYM2008</tt> (the default)
+            or <tt>MK1996</tt>. The former indicates that the module should 
+            respect wildcards while the latter indicates that <tt>*</tt> and
+            <tt>$</tt> should be treated as literals.
+        </p>
+    </dd>
+    
+    <dt>is_expired()</dt>
+    <dd><p>Return a boolean indicating whether or not the parser has passed its expiration
+            date (the dreaded "not-so-fresh" feeling). The expiration date is set when you
+            call <tt>fetch()</tt> either by reading the HTTP Expires header or by using
+            a default of seven days. See also the related attributes
+            <tt>expiration_date</tt> and <tt>use_local_time</tt>.
+        </p>
+    </dd>
+
+    <dt>get_crawl_delay(user_agent)</dt>
+    <dd>Returns the crawl delay for this user agent as a float, or <tt>None</tt>
+        if no crawl delay is defined.
+    </dd>
+</dl>
+
+<h4>Attributes</h4>
+
+<dl>
+    <dt>user_agent</dt>
+    <dd>Send this user agent string to the server when fetching robots.txt. If left blank,
+        Python's default is used.
+    </dd>
+    
+    <dt>source_url</dt>
+    <dd>This read-only attribute reports the URL that you used in the most recent call
+        to <tt>fetch()</tt>. This is useful when the
+        parser's expiration date passes because you can simply call
+        <tt>parser.fetch(parser.source_url)</tt> to refresh the parser.
+    </dd>
+    
+    <dt>use_local_time</dt>
+    <dd>A boolean that tells <tt>RobotExclusionRulesParser</tt> whether
+        <tt>expiration_date</tt> should be in local time or UTC (a.k.a. Greenwich
+        Mean Time).
+        Since <tt>expiration_date</tt> is set when you call <tt>fetch()</tt>, you
+        must set <tt>use_local_time</tt> <strong>before</strong> calling
+        <tt>fetch()</tt> for it to have any effect.
+
+        <p>If you only call <tt>is_expired()</tt> and never look at
+        <tt>expiration_date</tt>, you can leave <tt>use_local_time</tt> at its
+        default (True).
+        </p>
+    </dd>
+    
+    <dt>expiration_date</dt>
+    <dd>A timestamp that states when the robots.txt contents are out of date. The timestamp
+        is a Unix-style timestamp; i.e. a float counting the number of seconds since the
+        epoch. The function <tt>is_expired()</tt> will compare this to "now" for you.
+    </dd>
+    
+    <dt>response_code</dt>
+    <dd>The response code received during the last fetch from a remote server, or <tt>None</tt>
+        if fetch has not been called. When using Python &le; 2.3, this information is
+        less precise. It is set to 200 if the fetch is successful or None otherwise. (Older
+        versions of Python don't provide this information and so I have to fake it.)
+        
+        <p>This attribute is read-only.</p>
+    </dd>
+
+    <dt>sitemap</dt>
+    <dd>Deprecated. Use <tt>sitemaps</tt> instead.</dd>
+
+    <dt>sitemaps</dt>
+    <dd>A list of the sitemap URLs defined in the robots.txt. This module 
+        simply reports the data it found after the <tt>Sitemap</tt> directives.
+        No guarantees are made about
+        whether or not the URLs exist or are valid URLs. 
+        
+        <p>This attribute is read-only and defaults to an empty list.</p>
+    </dd>
+</dl>
+
+<h3>Usage - Class <tt>RobotFileParserLookalike</tt></h3>
+
+<p><tt>RobotFileParserLookalike</tt> is a drop-in replacement for 
+the standard library module, so I refer you to 
+<a href="http://docs.python.org/library/robotparser.html">the documentation
+for <tt>robotparser.RobotFileParser</tt> for API details</a>. 
+Only differences from the standard library module are mentioned below.
+</p>
+
+<h4>Functional Differences</h4>
+
+<dl>
+    <dt>can_fetch(useragent, url, syntax=GYM2008)</dt>
+    <dd>The <tt>syntax</tt> argument is not present in the standard library
+        version.
+    </dd>
+
+    <dt>mtime()</dt>
+    <dd>The <tt>robotparser</tt> documentation says that this function, 
+        "Returns the time the robots.txt file was last fetched". This isn't
+        true, though. It actually returns the last time <tt>modified()</tt> 
+        was called. Furthermore, it's up to the caller to call 
+        <tt>modified()</tt>; it's not called automatically when one calls 
+        <tt>RobotFileParser.read()</tt>. 
+        
+        <p>In other words, unless one calls <tt>modified()</tt>, 
+            <tt>mtime()</tt> will always return <tt>0</tt>.
+        </p>
+        
+        <p>This module's <tt>mtime()</tt> method mimics the <em>behavior</em>
+        of the standard library module, not its documentation.
+        </p>
+    </dd>
+</dl>
+
+<h4>Attribute Differences</h4>
+
+<p><tt>RobotFileParserLookalike</tt> exposes <tt>last_checked</tt> but
+none of <tt>entries</tt>, <tt>default_entry</tt>, <tt>disallow_all</tt>
+or <tt>allow_all</tt>.
+</p>
+
+
+<h3>Exceptions</h3>
+
+<p>Users of this module should be aware that it raises a few exceptions. Some of them
+are impossible to finesse internally (Unicode errors, for instance). Others are deliberately
+exposed because handling them is outside of the scope of the robots.txt specifications and
+thus outside of the scope of this module. (If, for instance, a robots.txt is present but an
+error occurs during its transmission.)
+</p>
+
+<p><strong>The first exception explicitly raised by this code is a Unicode exception</strong>
+(some flavor of <tt>UnicodeError</tt>). You
+can see that in two different situations. First, if the parser fetches a robots.txt file that
+can't be
+decoded using the encoding specified in the HTTP response header. (That encoding defaults to
+ISO-8859-1 which is a superset of US-ASCII which is what &gt; 99.9% of existing robots.txt
+files use.) Second, you'll see a Unicode exception
+if you feed a non-Unicode string (i.e. <tt>isinstance(YourString, unicode) ==
+False</tt>) to <tt>parse()</tt> and that string can't be decoded using ISO-8859-1.
+</p>
+
+<p><strong>The second exception explicitly raised by this code is a urllib2.URLError
+exception.</strong> <tt>fetch()</tt>
+uses <tt>urllib2.urlopen()</tt> and if that function raises an exception, the
+exception is passed up to the caller after being massaged to make it a little nicer to deal
+with.
+</p>
+
+<p>Note that not all non-200 response codes raise an exception. Those for which MK1996 defines
+specific actions are handled internally&nbsp;&ndash;
+</p>
+
+<ul>
+    <li>Anything in the range 200 - 299 is treated as "OK".</li>
+    <li>Redirections (30x codes) are handled automagically by urllib2.</li>
+    <li>401 and 403 mean everything is disallowed.</li>
+    <li>404 means everything is allowed.</li>
+</ul>
+
+<p>If the <tt>RobotExclusionRulesParser</tt> raises a URLError exception that the caller
+decides isn't fatal (e.g. the response code 410 Gone), she can just call
+<tt>parser.parse("")</tt> and use the parser as normal.
+</p>
+
+<p>Note that although urllib2 handles most redirects by itself, urllib2 can return 301/302 as
+the response code if the server generates
+an infinite loop of 301/302 redirects. Users of this module should be prepared to handle that
+response code.
+</p>
+
+<p><strong>These aren't the only exceptions that you might see</strong>, they're just the ones that
+the code raises explicitly. Another likely source for exceptions is the
+<tt>unicode()</tt> function. The function <tt>fetch()</tt> gets the encoding from
+the Content-Type header that comes with the robots.txt file. That encoding gets passed directly
+to <tt>unicode()</tt>. When I first started using <tt>unicode()</tt> I naïvely
+expected that an encoding Python didn't understand would be bounced back as a LookupError.
+Apparently I wasn't alone in thinking
+that; <a href="http://bugs.python.org/issue960874">Python
+bug 960874</a> was filed for that reason. But it was closed as no bug/no fix with the
+explanation that, <q>it is not guaranteed that you will only see LookupErrors (the same is
+true for most other Python APIs, e.g. most can generate MemoryErrors). Possible other errors
+are ValueErrors, NameErrors, ImportErrors, etc. etc.</q>. Explanations like this make me
+long for a construct like Java's <tt>throws</tt> keyword. <tt>:-/</tt>
+</p>
+
+<p>You also need to watch out for a variety of exceptions from <tt>fetch()</tt> because it
+calls urllib2 which calls httplib which calls socket. I repackage some of the exceptions
+but others get raised up to the caller untouched. Experience has taught me to watch out
+for
+<tt>httplib.BadStatusLine</tt>, <tt>socket.error</tt> and <tt>socket.timeout</tt>.
+You also need to handle <a href="http://bugs.python.org/issue900744">Python bug 900744</a> 
+which causes httplib to raise ValueError in some cases. This affects
+Python 2.4 but not 2.3. AFAIK there is no workaround other than to apply the patch supplied.
+</p>
+
+<p>Last but not least, there's <a href="http://bugs.python.org/issue1591774">a bug in 
+urllib2 that raises <tt>OSError</tt></a> on rare occasions. This has been fixed but
+as of Python 2.5.1 the patch has not yet been integrated.
+</p>
+
+
+<h3>A Simple Example</h3>
+
+<p>For extensive examples, see <a href="parser_test.py">parser_test.py</a>.</p>
+
+<pre>
+    import robotexclusionrulesparser
+
+    rerp = robotexclusionrulesparser.RobotExclusionRulesParser()
+
+    # I'll set the (optional) user_agent before calling fetch.
+    rerp.user_agent = "Foobot/2.1 (See http://example.net/foobot.html for info)"
+
+    # Note that there should be a try/except here to handle urllib2.URLError,
+    # socket.timeout, UnicodeError, etc.
+    rerp.fetch("http://www.example.org/robots.txt")
+    
+    user_agents_and_urls = [ ("Foobot", "/index.html"), ("Barbot", "/") ]
+
+    for user_agent, url in user_agents_and_urls:
+        print "Can %s fetch '%s'? %s" % \
+            (user_agent, url, rerp.is_allowed(user_agent, url))
+</pre>
+
+
+
+<h3 id="standards">Compliance with Published Specifications</h3>
+
+<p>
+"Does it comply with the spec?" is a trick question in this case; there is no real spec.
+<a href="http://www.robotstxt.org/norobots-rfc.txt">The most recent formal robots.txt
+format proposal</a> was published in 1996 (urk!) and that was only a draft which was
+never sanctified. (It says clearly at the top, "It is inappropriate to use Internet-Drafts
+as reference material...") Even specs that have gone through a full review and comment process
+can be open to interpretation, so it's no surprise that the robots.txt draft spec has some
+holes. Actually, it is surprisingly complete, considering.
+</p>
+
+<p>In addition, 
+<a href="http://googlewebmastercentral.blogspot.com/2008/06/improving-on-robots-exclusion-protocol.html">Google</a>, 
+<a href="http://ysearchblog.com/2008/06/03/one-standard-fits-all-robots-exclusion-protocol-for-yahoo-google-and-microsoft/">Yahoo</a>
+and 
+<a href="http://blogs.msdn.com/webmaster/archive/2008/06/03/robots-exclusion-protocol-joining-together-to-provide-better-documentation.aspx">Microsoft</a>
+announced in 2008 that they would jointly support extensions to the robots.txt syntax.
+Although a set of blog postings feels even a less official than an 
+unblessed draft RFC, this syntax is quickly becoming the <em>de facto</em> 
+standard. 
+</p>
+
+<p><strong>I refer to
+<a href="http://www.robotstxt.org/orig.html">Martijn Koster's 
+relatively well-known 1994 document</a> as MK1994, 
+<a href="http://www.robotstxt.org/norobots-rfc.txt">his lesser-known but
+more formal 1996 draft spec</a> as
+MK1996, and the Google-Yahoo-Microsoft syntax as GYM2008.</strong>
+</p>
+
+<p>
+This module implements all of MK1994, MK1996 and GYM2008. In particular, 
+it supports the following lesser-known parts of MK1994/96:
+</p>
+
+<ul>
+    <li>Both Allow: and Disallow: fields.</li>
+    <li>Any style end-of-line marker (\r, \n or \r\n).</li>
+    <li>Decoding %-encoded octets.</li>
+    <li>Expiration according to the timestamp in the HTTP Expires header sent with robots.txt.</li>
+</ul>
+
+<p>The vast majority of robots.txt tutorials and the like make no mention of 
+the features introduced in MK1996 (like Allow: fields) or wrongly attribute
+them to GYM2008. Furthermore, many insist that end-of-line markers
+must be Unix-style <tt>\n</tt> even though it is clearly stated in MK1994 
+and MK1996 that <tt>\r</tt>, <tt>\n</tt> and <tt>\r\n</tt> are 
+all acceptable. Even such luminaries as 
+<a href="http://en.wikipedia.org/wiki/Robots.txt">Wikipedia</a>,
+<a href="http://support.microsoft.com/kb/q217103/">Microsoft</a> and
+<a href="http://www.w3.org/TR/html4/appendix/notes.html#h-B.4.1.1">the W3C</a>
+seem unaware of MK1996, although they are willing
+to quote the older and less formal MK1994. Hrrmph.
+</p>
+
+
+<h4 id="gym2008">GYM2008</h4>
+
+<p>GYM2008 consists of three small extensions to MK1994/96. 
+<a href="http://www.google.com/support/webmasters/bin/answer.py?hl=en&amp;answer=40360">Google 
+describes two of them here</a> but you'll have to 
+<a href="http://help.yahoo.com/l/us/yahoo/search/webcrawler/slurp-03.html">visit
+Yahoo for an explanation of Crawl-delay</a>.
+</p>
+
+<p>Two of the three GYM2008 extensions are harmless. The
+Crawl-delay and Sitemap directives are ignored by older parsers and are
+a useful addition to the standard. 
+</p>
+
+<p>The GYM2008 allowance for path wildcards is less benign because it
+breaks parsers that obey MK1994/96. For instance, consider the following
+robots.txt:
+</p>
+
+<pre>
+   User-agent: *
+   Disallow: *
+</pre>
+
+<p>The User-agent line is valid in both MK1994/96 and GYM2008; it means simply 
+"all user agents". 
+But the Disallow path wildcard is specific to GYM2008 syntax. In the traditional 
+MK1994/96 syntax, all paths are treated literally, so this robots.txt
+says that only the file with the unlikely name '*' is disallowed. 
+Under GYM2008 syntax rules, <em>all</em> files are disallowed.
+</p>
+
+<p>This problem is exacerbated by the fact that many new Webmasters adopt 
+the GYM2008 syntax without realizing that it is relatively new and in 
+conflict with the 
+traditional syntax. As a result, if a bot that's been behaving perfectly
+well for 10+ years encounters a robots.txt like the one above,
+it may assume (correctly!) that it is permitted access to all files on the 
+site although the Webmaster assumes just the opposite. The Webmaster will
+assume that the bot is ill-behaved and may go so far as to ban it.
+</p>
+
+<p>This module defaults to GYM2008 syntax. This is unlikely to cause problems
+because the characters that GYM2008 reserves for special treatment 
+(<tt>*</tt> and <tt>$</tt>) are unlikely to occur as path literals. 
+In other words, a GYM2008-aware parser like this one is extremely unlikely to 
+misinterpret a robots.txt written to MK1994/96 standards. Note that the
+reverse is not true – it's very likely that a parser unaware of GYM2008 will 
+misinterpret the intent of a robots.txt that uses GYM2008-specific syntax.
+</p>
+
+<h3>My Extensions to Published Specifications</h3>
+
+<p>In the spirit of "be generous in what you accept", this module also handles some things
+that are invalid according to the specs.
+</p>
+
+<p>First, <tt>RobotExclusionRulesParser</tt> accepts "user-agent" or "useragent" in robots.txt
+whereas MK1994/96 only permit the former.
+</p>
+
+<p>The second and most signficant exception this module permits is the presence of non-ASCII
+characters in the significant fields of robots.txt. ("Significant"
+here means "anything outside of a comment".)  MK1994 doesn't address the subject of
+non-ASCII or encodings, but MK1996 (in Section 3.3, "Formal Syntax")
+makes it clear that only ASCII characters are allowed in significant
+fields. (Side note &ndash; actually only a subset of printable ASCII characters are allowed;
+but you'll have to read the spec yourself to get the gory details.)
+</p>
+
+<p>Despite what MK1996 says, 
+<a href="http://NikitaTheSpider.com/articles/RobotsTxt.html">a survey of real-world robots.txt files</a>
+shows that about one in every thousand includes non-ASCII in significant fields. Python's
+<tt>robotparser</tt> module rolls over and dies when it encounters these. In
+contrast, this module
+attempts to decode the file using (a) the encoding specified in the HTTP Content-Type header
+sent with robots.txt (if present, which is rare) or (b) a default of ISO-8859-1 as per the
+HTTP spec RFC 2616. This solves the encoding problems for nearly all non-ASCII robots.txt files.
+</p>
+
+<h3>Non-compliance with Published Specifications</h3>
+
+<p>MK1996 contradicts MK1994 somewhat. MK1994 (which only defines
+disallows) says that a blank path indicates nothing is disallowed. MK1996 (which
+defines both allows and disallows) doesn't permit blank paths (the minimal path is a
+single slash: <tt>/</tt>) but
+doesn't mention anything about this change in the section on backwards compatibility. AFAIK
+blank paths are still widely used in Disallow lines which is consistent with the fact that
+most of the Net seems to ignore MK1996 and regard MK1994 as the <i>de facto</i> standard.
+</p>
+
+<p>In the absence of other guidance, this code interprets blank disallow lines as
+meaning nothing is disallowed and for consistency interprets blank allow lines as meaning
+nothing is allowed. Thus, these two rules mean the same thing:
+</p>
+
+<pre>
+        # Disallow everything
+        User-agent: foobot
+        Disallow: /
+
+        # Allow nothing
+        User-agent: foobot
+        Allow:
+</pre>
+
+
+<h3>Version History</h3>
+
+<ul>
+    <li><strong>Current &ndash; 1.6.1 (1 September 2012)</strong> &ndash;
+        <ul>
+            <li>Fixed a couple of Python 2/3 bugs related to converting parsers
+            containing non-ASCII to strings (using <tt>str()</tt> or 
+            <tt>unicode()</tt>). These didn't affect rule evaluation.
+            </li>
+
+            <li>Fixed a typo in a message in <tt>parser_test.py</tt>.</li>
+        </ul>
+    </li>
+
+    <li>1.6.0 (14 July 2012) &ndash;
+        <ul>
+            <li>Added an optional timeout parameter to <tt>fetch()</tt>.
+            Thanks to Richard Boulton for the suggestion and patch.
+            </li>
+
+            <li>Fixed a Python 3.x syntax error introduced in version 1.5.</li>
+        </ul>
+    </li>
+
+    <li>1.5.0 (16 June 2012) &ndash;
+        <ul>
+            <li>Fixed a bug where attempting to fetch from non-existent domain
+                would raise a TypeError inside my Python 2/3-compatible 
+                error-raising code. Now it correctly raises 
+                <tt>urllib_error.URLError</tt>. I added a unit test for this 
+                to <tt>parser_test.py</tt>. Thanks to Dave Challis for the 
+                bug report.
+
+                <p>Fixed the documentation (this file) about <tt>sitemap</tt> 
+                which was deprecated in version 1.4 in favor of 
+                <tt>sitemaps</tt>.
+                </p>
+            </li>
+        </ul>
+    </li>
+
+    <li>1.4.0 (8 Nov 2011) &ndash;
+        <ul>
+            <li>Fixed a bug where the parser only read one sitemap URL per
+                <tt>robots.txt</tt> file. This was wrong; 
+                <a href="http://www.sitemaps.org/protocol.html#submit_robots">multiple sitemap URLs may be specified</a>.
+                New code adds the attribute <tt>sitemaps</tt> and 
+                deprecates <tt>sitemap</tt>. Thanks to Dan Lecocq for the 
+                bug report.
+            </li>
+        </ul>
+    </li>
+
+	<li>1.3 (28 March 2010) &ndash;
+	    <ul>
+	        <li>Added Python 3.1 support.</li>
+	        <li>Fixed the license text in the code which was still referring 
+	            to the old license. This code is BSD licensed.
+	        </li>
+	        <li>Replaced calls to <tt>map()</tt>
+	            and <tt>filter()</tt> with list comprehensions.
+	        </li>
+	    </ul>
+	</li>
+
+	<li>1.2.2 (22 November 2009) &ndash;
+	    <ul>
+	        <li>Fixed broken download URL that was being
+	            submitted to PyPi (d'oh!).</li>
+	    </ul>
+	</li>
+
+	<li>1.2.1 (19 November 2009) &ndash;
+	    <ul>
+	        <li>Changed references to <tt>email.utils</tt> to 
+	            <tt>email_utils</tt> which
+	            is friendlier to older Python versions. Thanks to Alex 
+	            Bendig for the heads up.
+	        </li>
+	        <li>Changed from a Python to BSD license.</li>
+	    </ul>
+	</li>
+
+	<li>1.2 (27 September 2009) &ndash;
+	    <ul>
+	        <li>Renamed the <tt>Ruleset</tt> class to <tt>_Ruleset</tt> and 
+	            moved it out of the <tt>RobotExclusionRulesParser</tt> class. 
+	            This move allows parser instances to be pickled. Thanks
+	            to Felipe H. for the bug report.
+	        </li>
+	        <li>Fixed an import problem (introduced in 0.9.6) that prevented
+	            the module from running under Python 2.4.
+	        </li>
+	        <li>Added docstrings.</li>
+	    </ul>
+	</li>
+
+	<li>1.1 (3 March 2009) &ndash;
+	    <ul>
+	        <li>Switched to the Python license.</li>
+	        <li>Added the <tt>RobotFileParserLookalike</tt> class to make
+	            it easier for existing code to adopt this module.
+	        </li>
+	        <li>Updated doc and tests.</li>
+	    </ul>
+	</li>
+
+	<li>1.0 (26 February 2009) &ndash;
+	    <ul>
+	        <li>Added support for GYM2008. Thanks to Roman Petrichev
+	            for the path wildcard patch.</li>
+	        <li>Expanded the tests and fixed the ones that were relying
+	            on files on the Web that didn't exist any longer.
+	        </li>
+	        <li>Made the code more respectful of PEP 8 and a bit cleaner.</li>
+	        <li>Added a setup.py.</li>
+	        <li>Lots of documentation updates.</li>
+	    </ul>
+	</li>
+
+	<li>0.9.6 (20 May 2008) &ndash; Several changes &ndash;
+	    <ul>
+	        <li>Added the <tt>response_code</tt> attribute.</li>
+	        <li>Replaced the deprecated rfc822 module with email.utils.</li>
+	        <li>Updated the references to robotstxt.org site which has been reorganized.</li>
+	        <li>Fixed a bug where robots.txt files sent with an Expires header in the old
+	            date format of C's <tt>asctime()</tt> would have their expiration date 
+	            calculated incorrectly. Since only 3% of robots.txt files come with an 
+	            Expires header and use of the old date format is rare, this bug probably 
+	            affected very few people.
+	        </li>
+	    </ul>
+	</li>
+
+	<li>0.9.5 (21 January 2008) &ndash; <em>This version was mislabeled 0.9.4 in the code.</em>
+	    Added a 100k limit to
+		the amount of data read by a call to <tt>fetch()</tt> to protect against Webmasters
+		who supply an ISO or some such instead of a robots.txt. (It happens...)
+	</li>
+
+	<li>0.9.4 (15 November 2007) &ndash; Added OSError to the list of 
+		possible exceptions mentioned in this documentation. No code changes.
+	</li>
+
+	<li>0.9.3 (14 December 2006) &ndash; Added a list of exceptions to
+	watch out for to this documentation. No code changes.
+	</li>
+
+	<li>0.9.3 (16 November 2006) &ndash; Added some calls to <tt>unicode</tt>
+	to the top of <tt>is_allowed()</tt> to make it easier for callers to debug Unicode
+	problems should they arise.
+	</li>
+
+	<li>0.9.2 (25 October 2006) &ndash; Changed <tt>_ParseContentTypeHeader()</tt>
+	to accept quoted values in the parameter field of HTTP content type headers so that an encoding
+	like <tt>charset="utf-8"</tt> is now interpreted properly.
+	</li>
+
+	<li>0.9.1 (22 October 2006) &ndash; Fixed a bug in the control character
+	scrubbing that caused pipe (ASCII 0x7c) to be considered a control character.
+	</li>
+
+	<li>0.9 (10 October 2006) &ndash; Added code to scrub control
+	characters (&lt; ASCII 0x20 and ASCII
+	0x7f) from the user-agent and path fields so that the string representation of a parser
+	is guaranteed not to contain any of these characters. This makes it easier to share
+	the string with other programs (like a database) which are often allergic to things like
+	embedded NULLs in strings. I added code to parser_test.py to challenge this new code.
+	</li>
+
+	<li>I bumped the version number up to .9 because the core of this module has been stable for
+	a while now.
+	</li>
+
+	<li>0.8.1 (24 September 2006) &ndash; Made <tt>source_url</tt> read-only. This isn't a
+	functional change, it just enforces what was formerly just conceptual.
+	</li>
+	<li>0.8.0 (14 April 2006) &ndash; Made <tt>_ParseContentTypeHeader()</tt> more robust when
+	dealing with malformed Content-Type headers.
+	</li>
+	<li>0.7.3 (27 March 2006) &ndash; Fixed a bug where I sometimes referenced an unset request object.
+	Added code to handle getdate_tz()'s undocumented ability to return None where the timezone
+	offset should be.
+	</li>
+	<li>0.7.2 (15 March 2006) &ndash; Several changes &ndash;
+		<ul>
+		    <li>Fixed a big bug that was a result of me misinterpreting the spec with regards to
+		        the handling of the default ('*') user-agent (big stoopid on my part).</li>
+		    <li>Added code to handle LookupError and ValueError exceptions raised
+		    from calls to <tt>unicode()</tt>. </li>
+		    <li>Changed <tt>__str__()</tt> to return a UTF-8 encoded string so that it won't
+		        fail when the robots.txt content is non-ASCII.
+		    </li>
+		    <li>Removed some redundant calls to <tt>.lower()</tt> in <tt>_ParseContentTypeHeader()</tt>.</li>
+		    <li>Added a comment about BOMs.</li>
+		    <li>Added more information to this document.</li>
+		</ul>
+	</li>
+	<li>0.7.1 (8 March 2006) &ndash; Minor bug fixes (nothing like real-world data to test on).</li>
+	<li>0.7 (Feb 2006) &ndash; First version.</li>
+</ul>
+
+<h3>License</h3>
+
+<p>This code is copyright Philip Semanchuk under 
+<a href="http://creativecommons.org/licenses/BSD/">a 3-clause BSD license</a>.
+</p>
+
+<p>Thanks to Bastian Kleineidam for writing Python's
+<tt>robotparser</tt> module.
+Parts of this module were inspired (directly and indirectly) by his work. 
+</p>
+
+
+
+<h3>Contact</h3>
+
+<p>
+<a href="mailto:philip@semanchuk.com">Comments, bug reports, etc.</a> are most welcome.
+</p>
+
+</body>
+</html>
