@@ -11,7 +11,6 @@ import sys
 PY_MAJOR_VERSION = sys.version_info[0]
 import time
 import calendar
-import socket
 
 if PY_MAJOR_VERSION < 3:
     import robotparser
@@ -23,8 +22,8 @@ else:
 import robotexclusionrulesparser
 
 
-# These are enabled by default.
-RUN_FETCH_TESTS = True
+# These are disabled by default.
+RUN_FETCH_TESTS = False
 
 
 
@@ -723,4 +722,161 @@ if RUN_FETCH_TESTS:
         print("Passed.")
     else:
         print("Skipping fetch timeout tests due to Python version <= 2.6.")
+
+    
+# ------------------------------------------
+# Test the length-based User-agent selection
+# ------------------------------------------
+
+print("Running length-based User-agent selection test...")
+s = """
+# robots.txt for http://www.example.com/
+
+User-agent: Foobot
+Disallow:  *
+Crawl-Delay: 5
+
+Sitemap: http://www.example.org/banana.xml
+
+User-agent: Foobot The Return 2
+Allow: /foo.html
+Crawl-Delay: .3
+Allow: /bar.html
+Disallow: *
+
+User-agent: Foobot The Return
+Disallow:  *
+Sitemap: http://www.example.net/sitemap.xml
+Sitemap: http://www.example.com/another_sitemap.xml
+
+User-agent: CamelBot
+Disallow: /foo.html
+Crawl-Delay: go away!
+"""
+parser.parse(s)
+
+assert(parser.is_allowed("Foobot", "/foo.html") == False)
+assert(parser.get_crawl_delay("Foobot") == 5)
+assert(parser.get_crawl_delay("Blahbot") == None)
+assert(parser.is_allowed("Foobot The Return 2", "/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/bar.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/x.html") == False)
+assert(parser.get_crawl_delay("Foobot The Return 2 ") == .3)
+assert(parser.is_allowed("Foobot The Return", "/foo.html") == False)
+assert(parser.sitemaps[1] == "http://www.example.net/sitemap.xml")
+assert(parser.get_crawl_delay("CamelBot") == None)
+
+print("Passed.")
+
+
+# ------------------------------------------
+# Test the length-based Allow/Disallow Rules
+# ------------------------------------------
+
+print("Running length-based User-agent selection test...")
+s = """
+# robots.txt for http://www.example.com/
+
+User-agent: Foobot
+Disallow:  *
+Crawl-Delay: 5
+
+Sitemap: http://www.example.org/banana.xml
+
+User-agent: Foobot The Return 2
+Disallow: *
+Allow: /foo.html
+Crawl-Delay: .3
+Allow: /bar.html
+
+User-agent: Foobot The Return
+Allow: /
+Allow: /files/public/
+Disallow: /files/
+Allow: /files/semi-public
+Sitemap: http://www.example.net/sitemap.xml
+Sitemap: http://www.example.com/another_sitemap.xml
+
+User-agent: CamelBot
+Disallow: /foo.html
+Crawl-Delay: go away!
+"""
+parser.parse(s)
+
+assert(parser.is_allowed("Foobot", "/foo.html") == False)
+assert(parser.get_crawl_delay("Foobot") == 5)
+assert(parser.get_crawl_delay("Blahbot") == None)
+assert(parser.is_allowed("Foobot The Return 2", "/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/bar.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/x.html") == False)
+assert(parser.get_crawl_delay("Foobot The Return 2 ") == .3)
+assert(parser.is_allowed("Foobot The Return", "/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/foo.html") == False)
+assert(parser.is_allowed("Foobot The Return", "/files/public/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/semi-public/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/private/foo.html") == False)
+assert(parser.sitemaps[1] == "http://www.example.net/sitemap.xml")
+assert(parser.get_crawl_delay("CamelBot") == None)
+
+print("Passed.")
+
+
+# --------------------
+# Test Erratic Spacing
+# --------------------
+
+print("Running Erratic Spacing test...")
+s = """
+# robots.txt for http://www.example.com/
+
+User-agent: Foobot
+Disallow:  *
+Crawl-Delay: 5
+
+Sitemap: http://www.example.org/banana.xml
+
+User-agent: Foobot The Return 2
+Disallow: *
+Allow: /foo.html
+
+Crawl-Delay: .3
+Allow: /bar.html
+
+User-agent: Foobot The Return
+Allow: /
+Allow: /files/public/
+Disallow: /files/
+
+
+
+Allow: /files/semi-public
+Sitemap: http://www.example.net/sitemap.xml
+Sitemap: http://www.example.com/another_sitemap.xml
+
+User-agent: CamelBot
+
+
+Disallow: /foo.html
+Crawl-Delay: go away!
+"""
+parser.parse(s)
+
+assert(parser.is_allowed("Foobot", "/foo.html") == False)
+assert(parser.get_crawl_delay("Foobot") == 5)
+assert(parser.get_crawl_delay("Blahbot") == None)
+assert(parser.is_allowed("Foobot The Return 2", "/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/bar.html") == True)
+assert(parser.is_allowed("Foobot The Return 2", "/x.html") == False)
+assert(parser.get_crawl_delay("Foobot The Return 2 ") == .3)
+assert(parser.is_allowed("Foobot The Return", "/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/foo.html") == False)
+assert(parser.is_allowed("Foobot The Return", "/files/public/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/semi-public/foo.html") == True)
+assert(parser.is_allowed("Foobot The Return", "/files/private/foo.html") == False)
+assert(parser.sitemaps[1] == "http://www.example.net/sitemap.xml")
+assert(parser.is_allowed("CamelBot", "/foo.html") == True)
+assert(parser.get_crawl_delay("CamelBot") == None)
+
+print("Passed.")
+
 

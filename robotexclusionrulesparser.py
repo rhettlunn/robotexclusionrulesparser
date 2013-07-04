@@ -244,6 +244,7 @@ class _Ruleset(object):
     def does_user_agent_match(self, user_agent):
         match = False
     
+        best_length = None
         for robot_name in self.robot_names:
             # MK1994 says, "A case insensitive substring match of the name 
             # without version information is recommended." MK1996 3.2.1 
@@ -251,10 +252,12 @@ class _Ruleset(object):
             # record in /robots.txt that contains a User-Agent line whose 
             # value contains the name token of the robot as a substring. 
             # The name comparisons are case-insensitive."
-            match = match or (robot_name == '*') or  \
-                             (robot_name.lower() in user_agent.lower())
+            if ((robot_name == '*') or 
+                    (robot_name.lower() in user_agent.lower())):
+                match = True
+                best_length = max(len(robot_name.lower()), best_length)
                 
-        return match
+        return match, best_length
 
     def is_url_allowed(self, url, syntax=GYM2008):
         allowed = True
@@ -267,10 +270,11 @@ class _Ruleset(object):
 
         url = _unquote_path(url)
     
-        done = False
+        best_match_len = None
         i = 0
-        while not done:
+        for i in range(len(self.rules)):
             rule_type, path = self.rules[i]
+            pathlen = len(path)
 
             if (syntax == GYM2008) and ("*" in path or path.endswith("$")):
                 # GYM2008-specific syntax applies here
@@ -283,26 +287,22 @@ class _Ruleset(object):
                 parts = path.split("*")
                 pattern = "%s%s" % \
                     (".*".join([re.escape(p) for p in parts]), appendix)
-                if re.match(pattern, url):
+                if re.match(pattern, url) and pathlen >= best_match_len:
                     # Ding!
-                    done = True
                     allowed = (rule_type == self.ALLOW)
+                    best_match_len = max(best_match_len, pathlen)
             else:  
                 # Wildcards are either not present or are taken literally.
-                if url.startswith(path):
+                if url.startswith(path) and pathlen >= best_match_len:
                     # Ding!
-                    done = True
                     allowed = (rule_type == self.ALLOW)
+                    best_match_len = max(best_match_len, pathlen)
                     # A blank path means "nothing", so that effectively 
                     # negates the value above. 
                     # e.g. "Disallow:   " means allow everything
                     if not path:
                         allowed = not allowed
 
-
-            i += 1
-            if i == len(self.rules):
-                done = True
             
         return allowed
 
@@ -357,6 +357,23 @@ class RobotExclusionRulesParser(object):
             return calendar.timegm(time.gmtime())
 
 
+    def _best_ruleset(self, user_agent):
+        """Finds the ruleset with the longest matching crawler string, and 
+        returns that ruleset.
+        
+        This is how Google describes its crawler as working.
+        """
+        best_match_length = None
+        best_ruleset = None
+        for ruleset in self.__rulesets:
+            is_match, match_length = ruleset.does_user_agent_match(user_agent)
+            if is_match and match_length >= best_match_length:
+                best_ruleset = ruleset
+                best_match_length = match_length
+
+        return best_ruleset
+        
+    
     def is_allowed(self, user_agent, url, syntax=GYM2008):
         """True if the user agent is permitted to visit the URL. The syntax 
         parameter can be GYM2008 (the default) or MK1996 for strict adherence 
@@ -383,9 +400,9 @@ class RobotExclusionRulesParser(object):
         if syntax not in (MK1996, GYM2008):
             _raise_error(ValueError, "Syntax must be MK1996 or GYM2008")
     
-        for ruleset in self.__rulesets:
-            if ruleset.does_user_agent_match(user_agent):
-                return ruleset.is_url_allowed(url, syntax)
+        best_ruleset = self._best_ruleset(user_agent)
+        if best_ruleset:
+            return best_ruleset.is_url_allowed(url, syntax)
                 
         return True
 
@@ -398,9 +415,9 @@ class RobotExclusionRulesParser(object):
         if (PY_MAJOR_VERSION < 3) and (not isinstance(user_agent, unicode)):
             user_agent = user_agent.decode()
     
-        for ruleset in self.__rulesets:
-            if ruleset.does_user_agent_match(user_agent):
-                return ruleset.crawl_delay
+        best_ruleset = self._best_ruleset(user_agent)
+        if best_ruleset:
+            return best_ruleset.crawl_delay
                 
         return None
 
@@ -572,12 +589,19 @@ class RobotExclusionRulesParser(object):
                 line = line.strip()
                 
                 if not line:
-                    # An empty line indicates the end of a ruleset.
-                    if current_ruleset and current_ruleset.is_not_empty():
-                        self.__rulesets.append(current_ruleset)
-                    
-                    current_ruleset = None
-                    previous_line_was_a_user_agent = False
+                    # An empty line indicates the end of a ruleset according
+                    # to MK1994; however, in actual use empty lines can be
+                    # used as visual separators and spacers.
+                    # Therefore we ignore blank lines, except when immediately
+                    # following a user_agent.
+                    if previous_line_was_a_user_agent:
+                        if current_ruleset and current_ruleset.is_not_empty():
+                            self.__rulesets.append(current_ruleset)
+                        
+                        current_ruleset = None
+                        previous_line_was_a_user_agent = False
+                    else:
+                        pass
                 else:
                     # Each non-empty line falls into one of six categories:
                     # 1) User-agent: blah blah blah
@@ -591,7 +615,7 @@ class RobotExclusionRulesParser(object):
                     # ("Unrecognised headers are ignored.")
                     # Note that 4 & 5 are specific to GYM2008 syntax, but 
                     # respecting them here is not a problem. They're just 
-                    # additional information the the caller is free to ignore.
+                    # additional information that the caller is free to ignore.
                     matches = _directive_regex.findall(line)
                     
                     # Categories 1 - 5 produce two matches, #6 produces none.
